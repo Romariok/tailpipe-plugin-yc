@@ -1,0 +1,11 @@
+{
+   "mcpServers": {
+     "tailpipe": {
+       "command": "npx",
+       "args": [
+         "-y",
+         "@turbot/tailpipe-mcp"
+       ]
+     }
+   }
+ }
