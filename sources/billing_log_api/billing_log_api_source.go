@@ -32,7 +32,7 @@ func (s *BillingLogAPISource) Identifier() string { return BillingLogAPISourceId
 func (s *BillingLogAPISource) Init(ctx context.Context, params *row_source.RowSourceParams, opts ...row_source.RowSourceOption) error {
 	s.RegisterSource(s)
 	s.NewCollectionStateFunc = collection_state.NewTimeRangeCollectionState
-	s.GetGranularityFunc = func() time.Duration { return 24 * time.Hour }
+	s.GetGranularityFunc = func() time.Duration { return time.Hour }
 	if err := s.RowSourceImpl.Init(ctx, params, opts...); err != nil {
 		return err
 	}
