@@ -1,6 +1,8 @@
 module github.com/Romariok/tailpipe-plugin-yc
 
-go 1.25.1
+go 1.24
+
+toolchain go1.24.1
 
 require (
 	github.com/hashicorp/hcl/v2 v2.20.1
