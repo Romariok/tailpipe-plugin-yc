@@ -104,8 +104,7 @@ SELECT
     CAST(cud_credit AS Double) AS cud_credit,
     CAST(misc_credit AS Double) AS misc_credit,
     locale
-FROM ` + "`" + s.Connection.ConnectionName + "`" + `
-LIMIT 1000;`
+FROM ` + "`" + s.Connection.ConnectionName + "`" + `;`
 
 	enrichment := schema.NewSourceEnrichment(nil)
 
