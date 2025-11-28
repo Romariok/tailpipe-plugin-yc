@@ -29,19 +29,11 @@ func (c *BillingLogTable) GetSourceMetadata() ([]*table.SourceMetadata[*BillingL
 
 func (c *BillingLogTable) EnrichRow(row *BillingLog, sourceEnrichmentFields schema.SourceEnrichment) (*BillingLog, error) {
 	row.CommonFields = sourceEnrichmentFields.CommonFields
-
 	row.TpID = xid.New().String()
-	if !row.ExportedAt.IsZero() {
-		row.TpDate = row.ExportedAt.Truncate(24 * time.Hour)
-	} else {
-		row.TpDate = row.Date.Truncate(24 * time.Hour)
-	}
-
-	if !row.ExportedAt.IsZero() {
-		row.TpTimestamp = row.ExportedAt
-	} else {
-		row.TpTimestamp = row.Date
-	}
+	row.TpDate = row.Date.Truncate(24 * time.Hour)
+	// Ensure TpTimestamp falls within the collection window for the billing day.
+	// Use end of the UTC day for the billing date to avoid filtering out the boundary day.
+	row.TpTimestamp = row.Date.Add(23*time.Hour + 59*time.Minute + 59*time.Second)
 	row.TpIngestTimestamp = time.Now()
 
 	return row, nil
