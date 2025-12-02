@@ -4,11 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"strconv"
 	"time"
 
 	"log/slog"
 
+	"github.com/Romariok/tailpipe-plugin-yc/tables"
 	"github.com/Romariok/tailpipe-plugin-yc/config"
 	"github.com/turbot/tailpipe-plugin-sdk/row_source"
 	"github.com/turbot/tailpipe-plugin-sdk/schema"
@@ -203,36 +203,36 @@ func (s *BillingLogAPISource) Collect(ctx context.Context) error {
 					); err != nil {
 						return err
 					}
-					dateStr := vString(date)
-					dateTime := moscowDateMidnightUTC(dateStr)
+					dateStr := tables.VString(date)
+					dateTime := tables.MoscowDateMidnightUTC(dateStr)
 					if dateTime.IsZero() {
 						continue
 					}
 					row := map[string]interface{}{
-						"billing_account_id":      vString(billingAccountID),
-						"billing_account_name":    vString(billingAccountName),
-						"cloud_id":                vString(cloudID),
-						"cloud_name":              vString(cloudName),
-						"folder_id":               vString(folderID),
-						"folder_name":             vString(folderName),
-						"resource_id":             vString(resourceID),
-						"service_id":              vString(serviceID),
-						"service_name":            vString(serviceName),
-						"sku_id":                  vString(skuID),
-						"sku_name":                vString(skuName),
-						"date":                    vTimeString(date),
-						"currency":                vString(currency),
-						"pricing_quantity":        vFloat(pricingQuantity),
-						"pricing_unit":            vString(pricingUnit),
-						"cost":                    vFloat(cost),
-						"credit":                  vFloat(credit),
-						"monetary_grant_credit":   vFloat(monetaryGrantCredit),
-						"volume_incentive_credit": vFloat(volumeIncentiveCredit),
-						"cud_credit":              vFloat(cudCredit),
-						"misc_credit":             vFloat(miscCredit),
-						"locale":                  vString(locale),
-						"updated_at":              vTimeString(updatedAt),
-						"exported_at":             vTimeString(exportedAt),
+						"billing_account_id":      tables.VString(billingAccountID),
+						"billing_account_name":    tables.VString(billingAccountName),
+						"cloud_id":                tables.VString(cloudID),
+						"cloud_name":              tables.VString(cloudName),
+						"folder_id":               tables.VString(folderID),
+						"folder_name":             tables.VString(folderName),
+						"resource_id":             tables.VString(resourceID),
+						"service_id":              tables.VString(serviceID),
+						"service_name":            tables.VString(serviceName),
+						"sku_id":                  tables.VString(skuID),
+						"sku_name":                tables.VString(skuName),
+						"date":                    tables.VTimeString(date),
+						"currency":                tables.VString(currency),
+						"pricing_quantity":        tables.VFloat(pricingQuantity),
+						"pricing_unit":            tables.VString(pricingUnit),
+						"cost":                    tables.VFloat(cost),
+						"credit":                  tables.VFloat(credit),
+						"monetary_grant_credit":   tables.VFloat(monetaryGrantCredit),
+						"volume_incentive_credit": tables.VFloat(volumeIncentiveCredit),
+						"cud_credit":              tables.VFloat(cudCredit),
+						"misc_credit":             tables.VFloat(miscCredit),
+						"locale":                  tables.VString(locale),
+						"updated_at":              tables.VTimeString(updatedAt),
+						"exported_at":             tables.VTimeString(exportedAt),
 					}
 					if err := s.RowSourceImpl.OnRow(ctx, &types.RowData{Data: row, SourceEnrichment: enrichment}); err != nil {
 						return err
@@ -250,49 +250,4 @@ func (s *BillingLogAPISource) Collect(ctx context.Context) error {
 	mskTodayStart := time.Date(mskNow.Year(), mskNow.Month(), mskNow.Day(), 0, 0, 0, 0, time.UTC)
 	s.CollectionTimeRange.UpperBoundary = mskTodayStart.Add(-3 * time.Hour)
 	return s.RowSourceImpl.OnCollectionComplete()
-}
-
-func vString(v sql.NullString) string {
-	if v.Valid {
-		return v.String
-	}
-	return ""
-}
-
-func vTimeString(v sql.NullString) string {
-	if !v.Valid || v.String == "" {
-		return ""
-	}
-	s := v.String
-	if ts, err := time.Parse(time.RFC3339Nano, s); err == nil {
-		return ts.UTC().Format(time.RFC3339Nano)
-	}
-	if ts, err := time.Parse(time.RFC3339, s); err == nil {
-		return ts.UTC().Format(time.RFC3339Nano)
-	}
-	if secs, err := strconv.ParseInt(s, 10, 64); err == nil {
-		return time.Unix(secs, 0).UTC().Format(time.RFC3339Nano)
-	}
-	if ts, err := time.Parse("2006-01-02", s); err == nil {
-		return ts.UTC().Format(time.RFC3339Nano)
-	}
-	return s
-}
-func vFloat(v sql.NullFloat64) float64 {
-	if v.Valid {
-		return v.Float64
-	}
-	return 0
-}
-
-// moscowDateMidnightUTC converts YYYY-MM-DD (Moscow local date) to the UTC instant of Moscow midnight
-func moscowDateMidnightUTC(s string) time.Time {
-	if s == "" {
-		return time.Time{}
-	}
-	ts, err := time.Parse("2006-01-02", s)
-	if err != nil {
-		return time.Time{}
-	}
-	return ts.Add(-3 * time.Hour).UTC()
 }

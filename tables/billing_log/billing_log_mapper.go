@@ -2,8 +2,8 @@ package billing_log
 
 import (
 	"context"
-	"time"
 
+	"github.com/Romariok/tailpipe-plugin-yc/tables"
 	sdkerrors "github.com/turbot/tailpipe-plugin-sdk/error_types"
 	"github.com/turbot/tailpipe-plugin-sdk/mappers"
 	sdktypes "github.com/turbot/tailpipe-plugin-sdk/types"
@@ -30,39 +30,39 @@ func (m *BillingLogMapper) Map(_ context.Context, data any, _ ...mappers.MapOpti
 	missing := []string{}
 	invalid := []string{}
 
-	billingAccountID, _ := toString(src["billing_account_id"])
-	billingAccountName, _ := toString(src["billing_account_name"])
-	cloudID, _ := toString(src["cloud_id"])
-	cloudName, _ := toString(src["cloud_name"])
-	folderID, _ := toString(src["folder_id"])
-	folderName, _ := toString(src["folder_name"])
-	resourceID, _ := toString(src["resource_id"])
-	serviceID, _ := toString(src["service_id"])
-	serviceName, _ := toString(src["service_name"])
-	skuID, _ := toString(src["sku_id"])
-	skuName, _ := toString(src["sku_name"])
-	currency, ok := toString(src["currency"])
+	billingAccountID, _ := tables.ToString(src["billing_account_id"])
+	billingAccountName, _ := tables.ToString(src["billing_account_name"])
+	cloudID, _ := tables.ToString(src["cloud_id"])
+	cloudName, _ := tables.ToString(src["cloud_name"])
+	folderID, _ := tables.ToString(src["folder_id"])
+	folderName, _ := tables.ToString(src["folder_name"])
+	resourceID, _ := tables.ToString(src["resource_id"])
+	serviceID, _ := tables.ToString(src["service_id"])
+	serviceName, _ := tables.ToString(src["service_name"])
+	skuID, _ := tables.ToString(src["sku_id"])
+	skuName, _ := tables.ToString(src["sku_name"])
+	currency, ok := tables.ToString(src["currency"])
 	if !ok {
 		invalid = append(invalid, "currency")
 	}
-	pricingQuantity, _ := toFloat64(src["pricing_quantity"])
-	pricingUnit, _ := toString(src["pricing_unit"])
-	cost, ok := toFloat64(src["cost"])
+	pricingQuantity, _ := tables.ToFloat64(src["pricing_quantity"])
+	pricingUnit, _ := tables.ToString(src["pricing_unit"])
+	cost, ok := tables.ToFloat64(src["cost"])
 	if !ok {
 		invalid = append(invalid, "cost")
 	}
-	credit, _ := toFloat64(src["credit"])
-	monetaryGrantCredit, _ := toFloat64(src["monetary_grant_credit"])
-	volumeIncentiveCredit, _ := toFloat64(src["volume_incentive_credit"])
-	cudCredit, _ := toFloat64(src["cud_credit"])
-	miscCredit, _ := toFloat64(src["misc_credit"])
-	locale, _ := toString(src["locale"])
-	date, ok := toTime(src["date"])
+	credit, _ := tables.ToFloat64(src["credit"])
+	monetaryGrantCredit, _ := tables.ToFloat64(src["monetary_grant_credit"])
+	volumeIncentiveCredit, _ := tables.ToFloat64(src["volume_incentive_credit"])
+	cudCredit, _ := tables.ToFloat64(src["cud_credit"])
+	miscCredit, _ := tables.ToFloat64(src["misc_credit"])
+	locale, _ := tables.ToString(src["locale"])
+	date, ok := tables.ToTime(src["date"])
 	if !ok {
 		invalid = append(invalid, "date")
 	}
-	updatedAt, _ := toTime(src["updated_at"])
-	exportedAt, _ := toTime(src["exported_at"])
+	updatedAt, _ := tables.ToTime(src["updated_at"])
+	exportedAt, _ := tables.ToTime(src["exported_at"])
 
 	if len(missing) > 0 || len(invalid) > 0 {
 		return nil, sdkerrors.NewRowErrorWithFields(missing, invalid)
@@ -98,50 +98,4 @@ func (m *BillingLogMapper) Map(_ context.Context, data any, _ ...mappers.MapOpti
 
 func (m *BillingLogMapper) Identifier() string {
 	return "yc_billing_log_mapper"
-}
-
-func toString(v interface{}) (string, bool) {
-	switch t := v.(type) {
-	case string:
-		return t, true
-	default:
-		return "", false
-	}
-}
-
-func toFloat64(v interface{}) (float64, bool) {
-	switch t := v.(type) {
-	case float64:
-		return t, true
-	case float32:
-		return float64(t), true
-	case int:
-		return float64(t), true
-	case int64:
-		return float64(t), true
-	case int32:
-		return float64(t), true
-	default:
-		return 0, false
-	}
-}
-
-func toTime(v interface{}) (time.Time, bool) {
-	switch t := v.(type) {
-	case time.Time:
-		return t, true
-	case string:
-		if ts, err := time.Parse(time.RFC3339Nano, t); err == nil {
-			return ts, true
-		}
-		if ts, err := time.Parse(time.RFC3339, t); err == nil {
-			return ts, true
-		}
-		if ts, err := time.Parse("2006-01-02", t); err == nil {
-			return ts, true
-		}
-		return time.Time{}, false
-	default:
-		return time.Time{}, false
-	}
 }
