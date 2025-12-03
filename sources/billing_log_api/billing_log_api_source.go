@@ -4,12 +4,13 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	"log/slog"
 
-	"github.com/Romariok/tailpipe-plugin-yc/tables"
 	"github.com/Romariok/tailpipe-plugin-yc/config"
+	"github.com/Romariok/tailpipe-plugin-yc/tables"
 	"github.com/turbot/tailpipe-plugin-sdk/row_source"
 	"github.com/turbot/tailpipe-plugin-sdk/schema"
 	"github.com/turbot/tailpipe-plugin-sdk/types"
@@ -65,7 +66,23 @@ func (s *BillingLogAPISource) Init(ctx context.Context, params *row_source.RowSo
 		}
 	}
 
-	dsn := fmt.Sprintf("grpcs://%s/%s", "grpc.yandex-query.cloud.yandex.net:2135", s.Connection.FolderID)
+	// Build DSN with optional custom endpoint
+	var dsn string
+	const defaultEndpoint = "grpc.yandex-query.cloud.yandex.net:2135"
+	if s.Connection.EndpointUrl != nil {
+		endpoint := strings.TrimSpace(*s.Connection.EndpointUrl)
+		if endpoint != "" {
+			// If a scheme is provided, assume it's a full DSN base; otherwise default to grpcs://
+			if strings.Contains(endpoint, "://") {
+				dsn = fmt.Sprintf("%s/%s", strings.TrimRight(endpoint, "/"), s.Connection.FolderID)
+			} else {
+				dsn = fmt.Sprintf("grpcs://%s/%s", endpoint, s.Connection.FolderID)
+			}
+		}
+	}
+	if dsn == "" {
+		dsn = fmt.Sprintf("grpcs://%s/%s", defaultEndpoint, s.Connection.FolderID)
+	}
 
 	db, err := ydb.Open(ctx, dsn, ydbOpts...)
 	if err != nil {
@@ -140,109 +157,129 @@ func (s *BillingLogAPISource) Collect(ctx context.Context) error {
 
 		ctxQ, cancel := context.WithTimeout(ctx, 60*time.Second)
 		defer cancel()
-		err := s.db.Table().Do(ctxQ, func(ctx context.Context, sess table.Session) error {
-			tx := table.TxControl(table.BeginTx(table.WithOnlineReadOnly()), table.CommitTx())
-			_, res, err := sess.Execute(ctx, tx, qCSV, nil)
-			if err != nil {
-				return err
-			}
-			defer res.Close()
-			for res.NextResultSet(ctx) {
-				for res.NextRow() {
-					var (
-						billingAccountID      sql.NullString
-						billingAccountName    sql.NullString
-						cloudID               sql.NullString
-						cloudName             sql.NullString
-						folderID              sql.NullString
-						folderName            sql.NullString
-						resourceID            sql.NullString
-						serviceID             sql.NullString
-						serviceName           sql.NullString
-						skuID                 sql.NullString
-						skuName               sql.NullString
-						updatedAt             sql.NullString
-						exportedAt            sql.NullString
-						date                  sql.NullString
-						currency              sql.NullString
-						pricingQuantity       sql.NullFloat64
-						pricingUnit           sql.NullString
-						cost                  sql.NullFloat64
-						credit                sql.NullFloat64
-						monetaryGrantCredit   sql.NullFloat64
-						volumeIncentiveCredit sql.NullFloat64
-						cudCredit             sql.NullFloat64
-						miscCredit            sql.NullFloat64
-						locale                sql.NullString
-					)
-					if err := res.Scan(
-						&billingAccountID,
-						&billingAccountName,
-						&cloudID,
-						&cloudName,
-						&folderID,
-						&folderName,
-						&resourceID,
-						&serviceID,
-						&serviceName,
-						&skuID,
-						&skuName,
-						&updatedAt,
-						&exportedAt,
-						&date,
-						&currency,
-						&pricingQuantity,
-						&pricingUnit,
-						&cost,
-						&credit,
-						&monetaryGrantCredit,
-						&volumeIncentiveCredit,
-						&cudCredit,
-						&miscCredit,
-						&locale,
-					); err != nil {
-						return err
-					}
-					dateStr := tables.VString(date)
-					dateTime := tables.MoscowDateMidnightUTC(dateStr)
-					if dateTime.IsZero() {
-						continue
-					}
-					row := map[string]interface{}{
-						"billing_account_id":      tables.VString(billingAccountID),
-						"billing_account_name":    tables.VString(billingAccountName),
-						"cloud_id":                tables.VString(cloudID),
-						"cloud_name":              tables.VString(cloudName),
-						"folder_id":               tables.VString(folderID),
-						"folder_name":             tables.VString(folderName),
-						"resource_id":             tables.VString(resourceID),
-						"service_id":              tables.VString(serviceID),
-						"service_name":            tables.VString(serviceName),
-						"sku_id":                  tables.VString(skuID),
-						"sku_name":                tables.VString(skuName),
-						"date":                    tables.VTimeString(date),
-						"currency":                tables.VString(currency),
-						"pricing_quantity":        tables.VFloat(pricingQuantity),
-						"pricing_unit":            tables.VString(pricingUnit),
-						"cost":                    tables.VFloat(cost),
-						"credit":                  tables.VFloat(credit),
-						"monetary_grant_credit":   tables.VFloat(monetaryGrantCredit),
-						"volume_incentive_credit": tables.VFloat(volumeIncentiveCredit),
-						"cud_credit":              tables.VFloat(cudCredit),
-						"misc_credit":             tables.VFloat(miscCredit),
-						"locale":                  tables.VString(locale),
-						"updated_at":              tables.VTimeString(updatedAt),
-						"exported_at":             tables.VTimeString(exportedAt),
-					}
-					if err := s.RowSourceImpl.OnRow(ctx, &types.RowData{Data: row, SourceEnrichment: enrichment}); err != nil {
-						return err
+		// Retry configuration
+		attempts := 1
+		if s.Connection.MaxErrorRetryAttempts != nil && *s.Connection.MaxErrorRetryAttempts > 0 {
+			attempts = *s.Connection.MaxErrorRetryAttempts
+		}
+		var baseDelay time.Duration
+		if s.Connection.MinErrorRetryDelay != nil && *s.Connection.MinErrorRetryDelay > 0 {
+			baseDelay = time.Duration(*s.Connection.MinErrorRetryDelay) * time.Millisecond
+		}
+
+		var execErr error
+		for try := 0; try < attempts; try++ {
+			execErr = s.db.Table().Do(ctxQ, func(ctx context.Context, sess table.Session) error {
+				tx := table.TxControl(table.BeginTx(table.WithOnlineReadOnly()), table.CommitTx())
+				_, res, err := sess.Execute(ctx, tx, qCSV, nil)
+				if err != nil {
+					return err
+				}
+				defer res.Close()
+				for res.NextResultSet(ctx) {
+					for res.NextRow() {
+						var (
+							billingAccountID      sql.NullString
+							billingAccountName    sql.NullString
+							cloudID               sql.NullString
+							cloudName             sql.NullString
+							folderID              sql.NullString
+							folderName            sql.NullString
+							resourceID            sql.NullString
+							serviceID             sql.NullString
+							serviceName           sql.NullString
+							skuID                 sql.NullString
+							skuName               sql.NullString
+							updatedAt             sql.NullString
+							exportedAt            sql.NullString
+							date                  sql.NullString
+							currency              sql.NullString
+							pricingQuantity       sql.NullFloat64
+							pricingUnit           sql.NullString
+							cost                  sql.NullFloat64
+							credit                sql.NullFloat64
+							monetaryGrantCredit   sql.NullFloat64
+							volumeIncentiveCredit sql.NullFloat64
+							cudCredit             sql.NullFloat64
+							miscCredit            sql.NullFloat64
+							locale                sql.NullString
+						)
+						if err := res.Scan(
+							&billingAccountID,
+							&billingAccountName,
+							&cloudID,
+							&cloudName,
+							&folderID,
+							&folderName,
+							&resourceID,
+							&serviceID,
+							&serviceName,
+							&skuID,
+							&skuName,
+							&updatedAt,
+							&exportedAt,
+							&date,
+							&currency,
+							&pricingQuantity,
+							&pricingUnit,
+							&cost,
+							&credit,
+							&monetaryGrantCredit,
+							&volumeIncentiveCredit,
+							&cudCredit,
+							&miscCredit,
+							&locale,
+						); err != nil {
+							return err
+						}
+						dateStr := tables.VString(date)
+						dateTime := tables.MoscowDateMidnightUTC(dateStr)
+						if dateTime.IsZero() {
+							continue
+						}
+						row := map[string]interface{}{
+							"billing_account_id":      tables.VString(billingAccountID),
+							"billing_account_name":    tables.VString(billingAccountName),
+							"cloud_id":                tables.VString(cloudID),
+							"cloud_name":              tables.VString(cloudName),
+							"folder_id":               tables.VString(folderID),
+							"folder_name":             tables.VString(folderName),
+							"resource_id":             tables.VString(resourceID),
+							"service_id":              tables.VString(serviceID),
+							"service_name":            tables.VString(serviceName),
+							"sku_id":                  tables.VString(skuID),
+							"sku_name":                tables.VString(skuName),
+							"date":                    tables.VTimeString(date),
+							"currency":                tables.VString(currency),
+							"pricing_quantity":        tables.VFloat(pricingQuantity),
+							"pricing_unit":            tables.VString(pricingUnit),
+							"cost":                    tables.VFloat(cost),
+							"credit":                  tables.VFloat(credit),
+							"monetary_grant_credit":   tables.VFloat(monetaryGrantCredit),
+							"volume_incentive_credit": tables.VFloat(volumeIncentiveCredit),
+							"cud_credit":              tables.VFloat(cudCredit),
+							"misc_credit":             tables.VFloat(miscCredit),
+							"locale":                  tables.VString(locale),
+							"updated_at":              tables.VTimeString(updatedAt),
+							"exported_at":             tables.VTimeString(exportedAt),
+						}
+						if err := s.RowSourceImpl.OnRow(ctx, &types.RowData{Data: row, SourceEnrichment: enrichment}); err != nil {
+							return err
+						}
 					}
 				}
+				return res.Err()
+			})
+			if execErr == nil {
+				break
 			}
-			return res.Err()
-		})
-		if err != nil {
-			return fmt.Errorf("failed to execute query: %w", err)
+			// backoff
+			if baseDelay > 0 && try+1 < attempts {
+				time.Sleep(baseDelay * time.Duration(1<<try))
+			}
+		}
+		if execErr != nil {
+			return fmt.Errorf("failed to execute query: %w", execErr)
 		}
 	}
 	utcNow := time.Now().UTC()
