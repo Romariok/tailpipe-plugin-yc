@@ -40,5 +40,5 @@ func (c *BillingLogTable) EnrichRow(row *BillingLog, sourceEnrichmentFields sche
 }
 
 func (c *BillingLogTable) GetDescription() string {
-	return "Yandex Cloud billing logs with service, cost, currency and date."
+	return "Yandex Cloud billing logs (daily, Moscow time): service/SKU, costs and credits, currency."
 }
