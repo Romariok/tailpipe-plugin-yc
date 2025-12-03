@@ -37,26 +37,32 @@ func (s *BillingLogAPISource) Init(ctx context.Context, params *row_source.RowSo
 		return err
 	}
 
+	logger := slog.With(
+		"source", BillingLogAPISourceIdentifier,
+		"connection", s.Connection.ConnectionName,
+		"folder_id", s.Connection.FolderID,
+	)
+
 	var ydbOpts []ydb.Option
 	if s.Connection.KeyFile != "" {
 		key, err := iamkey.ReadFromJSONFile(s.Connection.KeyFile)
 		if err != nil {
-			slog.Error("Failed to read service account key file", "error", err)
+			logger.Error("Failed to read service account key file", "error", err)
 			return err
 		} else {
 			creds, err := ycsdk.ServiceAccountKey(key)
 			if err != nil {
-				slog.Error("Failed to build YC credentials from key", "error", err)
+				logger.Error("Failed to build YC credentials from key", "error", err)
 				return err
 			} else {
 				sdk, err := ycsdk.Build(ctx, ycsdk.Config{Credentials: creds})
 				if err != nil {
-					slog.Error("Failed to init YC SDK for IAM exchange", "error", err)
+					logger.Error("Failed to init YC SDK for IAM exchange", "error", err)
 					return err
 				} else {
 					resp, err := sdk.CreateIAMTokenForServiceAccount(ctx, key.GetServiceAccountId())
 					if err != nil {
-						slog.Error("Failed to create IAM token from key", "error", err)
+						logger.Error("Failed to create IAM token from key", "error", err)
 						return err
 					} else if resp != nil {
 						ydbOpts = append(ydbOpts, ydb.WithAccessTokenCredentials(resp.IamToken))
@@ -69,23 +75,28 @@ func (s *BillingLogAPISource) Init(ctx context.Context, params *row_source.RowSo
 	// Build DSN with optional custom endpoint
 	var dsn string
 	const defaultEndpoint = "grpc.yandex-query.cloud.yandex.net:2135"
+	endpointUsed := "grpcs://" + defaultEndpoint
 	if s.Connection.EndpointUrl != nil {
 		endpoint := strings.TrimSpace(*s.Connection.EndpointUrl)
 		if endpoint != "" {
 			// If a scheme is provided, assume it's a full DSN base; otherwise default to grpcs://
 			if strings.Contains(endpoint, "://") {
 				dsn = fmt.Sprintf("%s/%s", strings.TrimRight(endpoint, "/"), s.Connection.FolderID)
+				endpointUsed = strings.TrimRight(endpoint, "/")
 			} else {
 				dsn = fmt.Sprintf("grpcs://%s/%s", endpoint, s.Connection.FolderID)
+				endpointUsed = "grpcs://" + endpoint
 			}
 		}
 	}
 	if dsn == "" {
 		dsn = fmt.Sprintf("grpcs://%s/%s", defaultEndpoint, s.Connection.FolderID)
 	}
+	logger.Info("Initializing YDB connection", "endpoint", endpointUsed)
 
 	db, err := ydb.Open(ctx, dsn, ydbOpts...)
 	if err != nil {
+		logger.Error("Failed to open YDB connection", "dsn", dsn, "error", err)
 		return fmt.Errorf("failed to open YDB connection: %w", err)
 	}
 	s.db = db
@@ -97,6 +108,10 @@ func (s *BillingLogAPISource) Collect(ctx context.Context) error {
 	enrichment := schema.NewSourceEnrichment(nil)
 
 	if s.db != nil {
+		logger := slog.With(
+			"source", BillingLogAPISourceIdentifier,
+			"connection", s.Connection.ConnectionName,
+		)
 		// Moscow timezone handling (UTC+3):
 		// - compute 'today' and 'yesterday' by Moscow calendar date
 		// - collection 'to' is Moscow today 00:00 converted to UTC (exclusive upper boundary)
@@ -118,6 +133,7 @@ func (s *BillingLogAPISource) Collect(ctx context.Context) error {
 				fromDateStr = lastTo.Add(3 * time.Hour).Format("2006-01-02")
 			}
 		}
+		logger.Info("Starting collection window", "from", fromDateStr, "to", toDateStr)
 
 		var qCSV string
 		selectClause := fmt.Sprintf(
@@ -279,6 +295,10 @@ func (s *BillingLogAPISource) Collect(ctx context.Context) error {
 			}
 		}
 		if execErr != nil {
+			logger.Error("Failed to execute YDB query after retries",
+				"attempts", attempts,
+				"error", execErr,
+			)
 			return fmt.Errorf("failed to execute query: %w", execErr)
 		}
 	}
@@ -286,5 +306,10 @@ func (s *BillingLogAPISource) Collect(ctx context.Context) error {
 	mskNow := utcNow.Add(3 * time.Hour)
 	mskTodayStart := time.Date(mskNow.Year(), mskNow.Month(), mskNow.Day(), 0, 0, 0, 0, time.UTC)
 	s.CollectionTimeRange.UpperBoundary = mskTodayStart.Add(-3 * time.Hour)
+	slog.Info("Collection complete",
+		"source", BillingLogAPISourceIdentifier,
+		"connection", s.Connection.ConnectionName,
+		"upper_boundary", s.CollectionTimeRange.UpperBoundary,
+	)
 	return s.RowSourceImpl.OnCollectionComplete()
 }

@@ -9,6 +9,10 @@ import (
 )
 
 func main() {
+	// Configure structured JSON logging as default
+	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{}))
+	slog.SetDefault(logger)
+
 	// if the `metadata` arg was passed, we are running in metadata mode - return our metadata
 	if len(os.Args) > 1 && os.Args[1] == "metadata" {
 		// print the metadata and exit
