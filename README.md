@@ -41,7 +41,7 @@ Then you must set up integration between Yandex Cloud Billing and Query:
    1. In the Query interface, select the service account for reading data from Object Storage in the connection creation dialog box and click **Create**.
    2. In the Query interface, choose `Billing` option in the **Automatically fill settings for** dropdown list. Next, click **Create** to complete the integration.
 
-Current instructions of setting up integration between Yandex CLoud Billing and Query can be found at [Yandex Cloud docs](https://yandex.cloud/en/docs/billing/operations/query-integration#integration).
+Current instructions of setting up integration between Yandex Cloud Billing and Query can be found at [Yandex Cloud docs](https://yandex.cloud/en/docs/billing/operations/query-integration#integration).
 
 Configure lifecycle in the bucket:
 
